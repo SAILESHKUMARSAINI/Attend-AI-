@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>{% block title %}AttendAI{% endblock %}</title>
+  <link rel="stylesheet" href="/static/css/style.css"/>
+</head>
+<body>
+  <nav class="navbar">
+    <div class="nav-brand">
+      <span class="brand-dot"></span>
+      AttendAI
+    </div>
+    <div class="nav-links">
+      <a href="/" class="nav-link {% if request.path == '/' %}active{% endif %}">Dashboard</a>
+      <a href="/register" class="nav-link {% if request.path == '/register' %}active{% endif %}">Register</a>
+      <a href="/attendance" class="nav-link {% if request.path == '/attendance' %}active{% endif %}">Attendance</a>
+      <a href="/analytics" class="nav-link {% if request.path == '/analytics' %}active{% endif %}">Analytics</a>
+      <a href="/admin" class="nav-link {% if request.path == '/admin' %}active{% endif %}">Admin</a>
+    </div>
+    <div id="session-badge" class="session-badge hidden">
+      <span class="badge-dot"></span>
+      Session Active &nbsp;<span id="nav-timer">--:--</span>
+    </div>
+  </nav>
+  <main class="main-content">
+    {% block content %}{% endblock %}
+  </main>
+  <script src="/static/js/main.js"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

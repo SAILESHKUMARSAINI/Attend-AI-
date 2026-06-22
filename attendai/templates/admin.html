@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}Admin — AttendAI{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Admin panel</h1>
+  <p class="page-sub">Manage students, sessions, and system settings</p>
+</div>
+
+<div class="card">
+  <div class="card-header"><h2>All registered students</h2>
+    <button onclick="loadAdminStudents()" class="btn-sm">Refresh</button>
+  </div>
+  <div id="admin-students"><p class="muted">Loading…</p></div>
+</div>
+
+<div class="card mt-lg">
+  <div class="card-header"><h2>All sessions</h2></div>
+  <div id="admin-sessions"><p class="muted">Loading…</p></div>
+</div>
+
+<div class="card mt-lg">
+  <div class="card-header"><h2>System info</h2></div>
+  <div class="info-grid">
+    <div><span class="muted">Backend</span><strong>Flask + Python</strong></div>
+    <div><span class="muted">Database</span><strong>MongoDB</strong></div>
+    <div><span class="muted">Face engine</span><strong>face_recognition (dlib)</strong></div>
+    <div><span class="muted">Camera lib</span><strong>OpenCV</strong></div>
+    <div><span class="muted">Tolerance</span><strong>0.5 (euclidean)</strong></div>
+    <div><span class="muted">Deployment</span><strong>Local / on-premise</strong></div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+async function loadAdminStudents() {
+  const res = await fetch("/api/students");
+  const students = await res.json();
+  const el = document.getElementById("admin-students");
+  if (students.length === 0) { el.innerHTML = "<p class='muted'>No students.</p>"; return; }
+  let html = `<table class="data-table"><thead><tr><th>ID</th><th>Name</th><th>Registered</th><th></th></tr></thead><tbody>`;
+  for (const s of students) {
+    const d = s.registered_at ? new Date(s.registered_at + "Z").toLocaleString() : "—";
+    html += `<tr>
+      <td><code>${s.student_id}</code></td><td>${s.name}</td><td>${d}</td>
+      <td><button class="btn-danger btn-sm" onclick="deleteStudent('${s.student_id}', '${s.name}')">Remove</button></td>
+    </tr>`;
+  }
+  html += "</tbody></table>";
+  el.innerHTML = html;
+}
+
+async function deleteStudent(sid, name) {
+  if (!confirm("Remove student " + name + "? This cannot be undone.")) return;
+  await fetch("/api/students/" + sid, { method: "DELETE" });
+  loadAdminStudents();
+}
+
+async function loadAdminSessions() {
+  const res = await fetch("/api/sessions");
+  const sessions = await res.json();
+  const el = document.getElementById("admin-sessions");
+  if (sessions.length === 0) { el.innerHTML = "<p class='muted'>No sessions yet.</p>"; return; }
+  let html = `<table class="data-table"><thead><tr><th>Session ID</th><th>Subject</th><th>Started</th><th>Ended</th><th>Status</th></tr></thead><tbody>`;
+  for (const s of sessions) {
+    const start = s.started_at ? new Date(s.started_at + "Z").toLocaleString() : "—";
+    const end = s.ended_at ? new Date(s.ended_at + "Z").toLocaleString() : "—";
+    html += `<tr>
+      <td><code>${s._id.slice(-6)}</code></td>
+      <td>${s.subject || "—"}</td>
+      <td>${start}</td>
+      <td>${end}</td>
+      <td><span class="badge ${s.active ? 'badge-green' : 'badge-gray'}">${s.active ? "Active" : "Ended"}</span></td>
+    </tr>`;
+  }
+  html += "</tbody></table>";
+  el.innerHTML = html;
+}
+
+loadAdminStudents();
+loadAdminSessions();
+</script>
+{% endblock %}

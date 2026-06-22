@@ -1,0 +1,230 @@
+{% extends "base.html" %}
+{% block title %}Attendance — AttendAI{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Live attendance</h1>
+  <p class="page-sub">Start a session, then let students face the camera</p>
+</div>
+
+<div class="two-col">
+  <div class="card">
+    <div class="card-header"><h2>Session control</h2></div>
+    <div id="session-controls">
+      <div class="form-group">
+        <label>Subject</label>
+        <input type="text" id="subject" placeholder="e.g. Mathematics"/>
+      </div>
+      <div class="form-group">
+        <label>Duration (minutes)</label>
+        <input type="number" id="duration" value="60" min="1" max="300"/>
+      </div>
+      <button id="btn-start" onclick="startSession()" class="btn-primary btn-full">Start session</button>
+    </div>
+
+    <div id="session-active-panel" class="hidden">
+      <div class="session-info-box">
+        <span class="badge badge-green">Live</span>
+        <strong id="active-subject">—</strong>
+      </div>
+      <div class="timer-display">
+        Time remaining: <span id="countdown">—</span>
+      </div>
+      <button onclick="stopSession()" class="btn-danger btn-full mt-sm">End session</button>
+    </div>
+
+    <div id="session-message" class="message hidden"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><h2>Live camera feed</h2></div>
+    <div class="cam-wrap">
+      <video id="video" autoplay playsinline></video>
+      <canvas id="canvas" style="display:none"></canvas>
+    </div>
+    <div class="cam-controls">
+      <button id="btn-cam" onclick="toggleCamera()">Start camera</button>
+      <button id="btn-auto" onclick="toggleAuto()" class="btn-primary" disabled>Start auto-scan</button>
+    </div>
+    <div class="scan-status">
+      Status: <span id="scan-status">Idle</span>
+    </div>
+  </div>
+</div>
+
+<div class="card mt-lg">
+  <div class="card-header">
+    <h2>Present today</h2>
+    <span id="present-count" class="badge badge-blue">0</span>
+  </div>
+  <div id="attendance-list"><p class="muted">No attendance records yet for this session.</p></div>
+</div>
+
+<div id="recognition-toast" class="toast hidden"></div>
+{% endblock %}
+{% block scripts %}
+<script>
+let stream = null;
+let scanInterval = null;
+let scanning = false;
+let currentSessionId = null;
+let countdownInterval = null;
+
+async function startSession() {
+  const subject = document.getElementById("subject").value.trim() || "General";
+  const duration = parseInt(document.getElementById("duration").value) || 60;
+  const res = await fetch("/api/session/start", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ subject, duration_minutes: duration }),
+  });
+  const data = await res.json();
+  showSessionMsg(data.message, data.success ? "success" : "error");
+  if (data.success) {
+    currentSessionId = data.session_id;
+    showActivePanel(subject);
+    loadAttendance();
+    startCountdown(duration * 60);
+  }
+}
+
+async function stopSession() {
+  if (!confirm("End the current session?")) return;
+  await fetch("/api/session/stop", { method: "POST" });
+  hideActivePanel();
+  stopAuto();
+  loadAttendance();
+  clearInterval(countdownInterval);
+}
+
+function showActivePanel(subject) {
+  document.getElementById("session-controls").classList.add("hidden");
+  document.getElementById("session-active-panel").classList.remove("hidden");
+  document.getElementById("active-subject").textContent = subject;
+  document.getElementById("btn-auto").disabled = false;
+}
+
+function hideActivePanel() {
+  document.getElementById("session-controls").classList.remove("hidden");
+  document.getElementById("session-active-panel").classList.add("hidden");
+  document.getElementById("btn-auto").disabled = true;
+  currentSessionId = null;
+}
+
+function startCountdown(seconds) {
+  clearInterval(countdownInterval);
+  let remaining = seconds;
+  countdownInterval = setInterval(() => {
+    if (remaining <= 0) { clearInterval(countdownInterval); hideActivePanel(); return; }
+    const m = String(Math.floor(remaining / 60)).padStart(2, "0");
+    const s = String(remaining % 60).padStart(2, "0");
+    document.getElementById("countdown").textContent = m + ":" + s;
+    remaining--;
+  }, 1000);
+}
+
+async function toggleCamera() {
+  if (stream) {
+    stream.getTracks().forEach(t => t.stop());
+    stream = null;
+    document.getElementById("video").srcObject = null;
+    document.getElementById("btn-cam").textContent = "Start camera";
+    stopAuto();
+  } else {
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
+      document.getElementById("video").srcObject = stream;
+      document.getElementById("btn-cam").textContent = "Stop camera";
+    } catch(e) { alert("Camera error: " + e.message); }
+  }
+}
+
+function toggleAuto() {
+  if (scanning) { stopAuto(); } else { startAuto(); }
+}
+
+function startAuto() {
+  if (!stream) { alert("Please start the camera first"); return; }
+  scanning = true;
+  document.getElementById("btn-auto").textContent = "Stop auto-scan";
+  document.getElementById("scan-status").textContent = "Scanning…";
+  scanInterval = setInterval(scanFrame, 2000);
+}
+
+function stopAuto() {
+  scanning = false;
+  clearInterval(scanInterval);
+  document.getElementById("btn-auto").textContent = "Start auto-scan";
+  document.getElementById("scan-status").textContent = "Idle";
+}
+
+async function scanFrame() {
+  if (!stream) return;
+  const video = document.getElementById("video");
+  const canvas = document.getElementById("canvas");
+  canvas.width = video.videoWidth || 640;
+  canvas.height = video.videoHeight || 480;
+  canvas.getContext("2d").drawImage(video, 0, 0);
+  const b64 = canvas.toDataURL("image/jpeg", 0.75);
+
+  const res = await fetch("/api/recognize", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ image: b64 }),
+  });
+  const data = await res.json();
+  if (data.success) {
+    if (!data.already_marked) {
+      showToast(data.name + " marked present (" + data.confidence + "% confidence)", "success");
+      loadAttendance();
+    } else {
+      showToast(data.name + " already marked", "info");
+    }
+    document.getElementById("scan-status").textContent = "Last: " + data.name;
+  } else {
+    document.getElementById("scan-status").textContent = data.message || "No face detected";
+  }
+}
+
+async function loadAttendance() {
+  if (!currentSessionId) return;
+  const res = await fetch("/api/attendance/" + currentSessionId);
+  const records = await res.json();
+  document.getElementById("present-count").textContent = records.length;
+  if (records.length === 0) {
+    document.getElementById("attendance-list").innerHTML = "<p class='muted'>No records yet.</p>";
+    return;
+  }
+  let html = `<table class="data-table"><thead><tr><th>Student ID</th><th>Name</th><th>Time</th></tr></thead><tbody>`;
+  for (const r of records) {
+    const t = new Date(r.timestamp + "Z").toLocaleTimeString();
+    html += `<tr><td><code>${r.student_id}</code></td><td>${r.student_name}</td><td>${t}</td></tr>`;
+  }
+  html += "</tbody></table>";
+  document.getElementById("attendance-list").innerHTML = html;
+}
+
+function showToast(msg, type) {
+  const t = document.getElementById("recognition-toast");
+  t.textContent = msg;
+  t.className = "toast " + type;
+  setTimeout(() => t.className = "toast hidden", 3500);
+}
+
+function showSessionMsg(msg, type) {
+  const el = document.getElementById("session-message");
+  el.textContent = msg;
+  el.className = "message " + type;
+}
+
+(async () => {
+  const res = await fetch("/api/session/status");
+  const s = await res.json();
+  if (s.active && s.session) {
+    currentSessionId = s.session._id;
+    showActivePanel(s.session.subject);
+    if (s.session.remaining_seconds) startCountdown(s.session.remaining_seconds);
+    loadAttendance();
+  }
+})();
+</script>
+{% endblock %}

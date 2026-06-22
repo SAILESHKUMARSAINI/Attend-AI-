@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — AttendAI{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Dashboard</h1>
+  <p class="page-sub">Real-time overview of AttendAI</p>
+</div>
+
+<div class="stats-grid" id="stats-grid">
+  <div class="stat-card">
+    <div class="stat-label">Registered students</div>
+    <div class="stat-value" id="stat-students">—</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Sessions held</div>
+    <div class="stat-value" id="stat-sessions">—</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Session status</div>
+    <div class="stat-value" id="stat-status">—</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Today's attendance</div>
+    <div class="stat-value" id="stat-today">—</div>
+  </div>
+</div>
+
+<div class="card mt-lg">
+  <div class="card-header">
+    <h2>Active session</h2>
+  </div>
+  <div id="active-session-panel" class="session-panel">
+    <p class="muted">No active session. Go to <a href="/attendance">Attendance</a> to start one.</p>
+  </div>
+</div>
+
+<div class="card mt-lg">
+  <div class="card-header">
+    <h2>Recent sessions</h2>
+  </div>
+  <div id="sessions-table-wrap">
+    <p class="muted">Loading…</p>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+async function loadDashboard() {
+  const [studRes, sessRes, statusRes] = await Promise.all([
+    fetch("/api/students"), fetch("/api/sessions"), fetch("/api/session/status")
+  ]);
+  const students = await studRes.json();
+  const sessions = await sessRes.json();
+  const status = await statusRes.json();
+
+  document.getElementById("stat-students").textContent = students.length;
+  document.getElementById("stat-sessions").textContent = sessions.length;
+  document.getElementById("stat-status").textContent = status.active ? "Active" : "Idle";
+  document.getElementById("stat-status").style.color = status.active ? "var(--green)" : "var(--text-muted)";
+
+  if (status.active && status.session) {
+    const s = status.session;
+    document.getElementById("active-session-panel").innerHTML = `
+      <div class="session-info">
+        <span class="badge badge-green">Live</span>
+        <strong>${s.subject}</strong>
+        <span class="muted">· Session ID: ${s._id.slice(-6)}</span>
+      </div>
+      <div class="session-present" id="dash-present">Loading attendance…</div>
+    `;
+    const attRes = await fetch("/api/attendance/" + s._id);
+    const att = await attRes.json();
+    document.getElementById("dash-present").textContent = `${att.length} student(s) marked present`;
+    document.getElementById("stat-today").textContent = att.length;
+  } else {
+    document.getElementById("stat-today").textContent = "—";
+  }
+
+  const recent = sessions.slice(-5).reverse();
+  if (recent.length === 0) {
+    document.getElementById("sessions-table-wrap").innerHTML = "<p class='muted'>No sessions yet.</p>";
+    return;
+  }
+  let html = `<table class="data-table"><thead><tr><th>Subject</th><th>Started</th><th>Status</th></tr></thead><tbody>`;
+  for (const s of recent) {
+    const d = new Date(s.started_at + "Z");
+    html += `<tr>
+      <td>${s.subject || "—"}</td>
+      <td>${d.toLocaleString()}</td>
+      <td><span class="badge ${s.active ? 'badge-green' : 'badge-gray'}">${s.active ? "Active" : "Ended"}</span></td>
+    </tr>`;
+  }
+  html += "</tbody></table>";
+  document.getElementById("sessions-table-wrap").innerHTML = html;
+}
+loadDashboard();
+</script>
+{% endblock %}

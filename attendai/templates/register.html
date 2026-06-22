@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+{% block title %}Register Student — AttendAI{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Register student</h1>
+  <p class="page-sub">Capture face images to enroll a new student</p>
+</div>
+
+<div class="two-col">
+  <div class="card">
+    <div class="card-header"><h2>Camera</h2></div>
+    <div class="cam-wrap">
+      <video id="video" autoplay playsinline></video>
+      <canvas id="canvas" style="display:none"></canvas>
+    </div>
+    <div class="cam-controls">
+      <button id="btn-start-cam" onclick="startCamera()">Start camera</button>
+      <button id="btn-capture" onclick="captureImage()" disabled class="btn-primary">Capture image</button>
+      <button id="btn-clear" onclick="clearImages()">Clear all</button>
+    </div>
+    <div class="capture-count">Captured: <span id="capture-count">0</span> / 5 images</div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><h2>Student details</h2></div>
+    <div class="form-group">
+      <label>Student ID</label>
+      <input type="text" id="student-id" placeholder="e.g. STU001"/>
+    </div>
+    <div class="form-group">
+      <label>Full name</label>
+      <input type="text" id="student-name" placeholder="e.g. Aditya Sharma"/>
+    </div>
+
+    <div id="preview-strip" class="preview-strip"></div>
+
+    <button id="btn-register" onclick="registerStudent()" class="btn-primary btn-full" disabled>
+      Register student
+    </button>
+    <div id="reg-message" class="message hidden"></div>
+  </div>
+</div>
+
+<div class="card mt-lg">
+  <div class="card-header">
+    <h2>Registered students</h2>
+    <button onclick="loadStudents()" class="btn-sm">Refresh</button>
+  </div>
+  <div id="students-list"><p class="muted">Loading…</p></div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+let stream = null;
+let capturedImages = [];
+
+async function startCamera() {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
+    document.getElementById("video").srcObject = stream;
+    document.getElementById("btn-capture").disabled = false;
+    document.getElementById("btn-start-cam").textContent = "Camera on";
+  } catch(e) {
+    showMessage("Camera error: " + e.message, "error");
+  }
+}
+
+function captureImage() {
+  if (capturedImages.length >= 5) { showMessage("Maximum 5 images captured", "info"); return; }
+  const video = document.getElementById("video");
+  const canvas = document.getElementById("canvas");
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  canvas.getContext("2d").drawImage(video, 0, 0);
+  const b64 = canvas.toDataURL("image/jpeg", 0.85);
+  capturedImages.push(b64);
+  updatePreview();
+}
+
+function updatePreview() {
+  document.getElementById("capture-count").textContent = capturedImages.length;
+  const strip = document.getElementById("preview-strip");
+  strip.innerHTML = capturedImages.map((img, i) =>
+    `<div class="thumb-wrap"><img src="${img}" class="thumb"/><button class="thumb-del" onclick="removeImage(${i})">x</button></div>`
+  ).join("");
+  document.getElementById("btn-register").disabled = capturedImages.length < 1;
+}
+
+function removeImage(i) { capturedImages.splice(i, 1); updatePreview(); }
+function clearImages() { capturedImages = []; updatePreview(); }
+
+async function registerStudent() {
+  const sid = document.getElementById("student-id").value.trim();
+  const name = document.getElementById("student-name").value.trim();
+  if (!sid || !name) { showMessage("Please fill in all fields", "error"); return; }
+  if (capturedImages.length === 0) { showMessage("Please capture at least one image", "error"); return; }
+
+  document.getElementById("btn-register").disabled = true;
+  document.getElementById("btn-register").textContent = "Registering…";
+
+  const res = await fetch("/api/register", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ student_id: sid, name: name, images: capturedImages }),
+  });
+  const data = await res.json();
+  showMessage(data.message, data.success ? "success" : "error");
+  if (data.success) {
+    document.getElementById("student-id").value = "";
+    document.getElementById("student-name").value = "";
+    clearImages();
+    loadStudents();
+  }
+  document.getElementById("btn-register").disabled = false;
+  document.getElementById("btn-register").textContent = "Register student";
+}
+
+function showMessage(msg, type) {
+  const el = document.getElementById("reg-message");
+  el.textContent = msg;
+  el.className = "message " + type;
+}
+
+async function loadStudents() {
+  const res = await fetch("/api/students");
+  const students = await res.json();
+  const el = document.getElementById("students-list");
+  if (students.length === 0) { el.innerHTML = "<p class='muted'>No students registered yet.</p>"; return; }
+  let html = `<table class="data-table"><thead><tr><th>ID</th><th>Name</th><th>Registered</th><th></th></tr></thead><tbody>`;
+  for (const s of students) {
+    const d = s.registered_at ? new Date(s.registered_at + "Z").toLocaleString() : "—";
+    html += `<tr>
+      <td><code>${s.student_id}</code></td>
+      <td>${s.name}</td>
+      <td>${d}</td>
+      <td><button class="btn-danger btn-sm" onclick="deleteStudent('${s.student_id}')">Remove</button></td>
+    </tr>`;
+  }
+  html += "</tbody></table>";
+  el.innerHTML = html;
+}
+
+async function deleteStudent(sid) {
+  if (!confirm("Remove student " + sid + "?")) return;
+  await fetch("/api/students/" + sid, { method: "DELETE" });
+  loadStudents();
+}
+
+loadStudents();
+</script>
+{% endblock %}
